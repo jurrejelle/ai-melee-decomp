@@ -107,3 +107,10 @@ Perfect match or partial match indicator.
 - Use the default output mode while iterating.
 - If you’re stuck on stack layout or scheduling, temporarily use `--full-both` to compare the full instruction streams.
 
+## Notes on making matches
+- We aim for "true matches" instead of "fake matches". A true match is code like how the developer has written it, e.g. `var->x3[i*2] = 3`, whereas a fake match is code that technically matches but is "slop", e.g. `*(s16*) var+x3+i*2 = 3`
+- Avoid pointer arithmathics for that reason. Most likely, the devs didn't intend to use raw pointer math.
+- Any loop like `i=0; do{ blabla; i++} while (i<10)` should be transformed into `for (i=0; i<10; i++){` instead.
+- Avoid labels like `after_if:` and `goto after_if`, use control flow, if statements, for/while loops etc instead.
+- For structs, label them based on the local offset of the struct. E.g. `struct { /* 0x00 */ u16 x00, /* 0x02 */ u16 x02}` etc. You are allowed to also put the global offset behind the local offset in the comment if it's relevant (e.g. gets referenced from a struct it's embedded in a lot).
+

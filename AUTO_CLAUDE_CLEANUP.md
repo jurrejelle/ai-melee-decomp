@@ -23,4 +23,4 @@ For EACH function, follow this exact workflow:
 
   ## Abort rules (save time)
   - If you've spent more than 4 build/verify cycles on one function with no progress, skip it
-  - If a fix requires changing a shared header struct/enum that would cascade to many functions, DO NOT apply it — instead log it as "SYSTEMIC: needs [description]" and skip. These need coordinated changes.
+  - If a fix requires changing a shared header struct/enum that would cascade to many functions outside of the files you're currently working on, DO NOT apply it — instead log it as "SYSTEMIC: needs [description]" and skip. These need coordinated changes.

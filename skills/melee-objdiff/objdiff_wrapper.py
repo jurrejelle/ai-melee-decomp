@@ -113,6 +113,7 @@ def print_target_diff_only(sym: dict[str, Any]) -> None:
     print(f"   {'-' * 50}")
 
     printed = 0
+    no_target_data = 0
     for e in diffs:
         kind = e.get("diff_kind", "CHANGED")
 
@@ -123,22 +124,25 @@ def print_target_diff_only(sym: dict[str, Any]) -> None:
             printed += 1
             continue
 
-        # Some objdiff JSON entries don't include `right` even when there is a mismatch.
-        # In that case, fall back to the unified stream instruction so we still show *where*
-        # the mismatch is (address/op), even if it is not the pure target view.
-        inst = e.get("instruction")
-        if inst:
-            print(f"   >>> {format_inst(inst)}  <-- {kind} (fallback)")
-            printed += 1
-            continue
-
         # For DIFF_INSERT (extra in ours), there may be only a `left`.
         left_inst = e.get("left")
         if left_inst:
             print(f"   >>> (no target inst) ours has {format_inst(left_inst)}  <-- {kind}")
             printed += 1
+            continue
 
-    if printed == 0:
+        # objdiff does not include the target-side instruction for some diff types
+        # (e.g. DIFF_ARG_MISMATCH). The `instruction` field here is OUR instruction,
+        # NOT the target — showing it in the target section would be misleading.
+        # Count these and suggest --full-both instead.
+        if e.get("instruction"):
+            no_target_data += 1
+
+    if no_target_data:
+        print(f"   ({no_target_data} {no_target_data == 1 and 'entry' or 'entries'} omitted: objdiff did not provide target instruction data")
+        print(f"    for these diff types. Use --full-both to see the full target assembly.)")
+
+    if printed == 0 and no_target_data == 0:
         print("   (no printable entries)")
 
     print(f"   {'-' * 50}")

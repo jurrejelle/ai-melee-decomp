@@ -8,7 +8,7 @@ How to setup AI-based decomp for melee:
 1. Clone your melee fork (/home/sysop/Melee/melee for me)
 2. Create a venv (`python3 -m venv /home/sysop/Melee/.venv`)
 3. `source /home/sysop/Melee/.venv/bin/activate`
-4. `for i in \`melee/reqs/*.txt\`; do pip3 install -r $i; done`
+4. `for i in $(melee/reqs/*.txt); do pip3 install -r $i; done`
 5. `apt install ninja-build`
 5. `mkdir objdiffs`
 6. `wget https://github.com/encounter/objdiff/releases/download/v3.6.1/objdiff-cli-linux-x86_64 -o objdiffs/`
@@ -39,3 +39,5 @@ For this guide we will be requestmaxxing using copilot's request system and opus
 11. Press ctrl+a + d, this will detatch from the screen. You can now leave if you want
 12. To re-attach, `screen -r decomp`
 
+TODO:
+- Add checking for remote build to prevent cicd failures

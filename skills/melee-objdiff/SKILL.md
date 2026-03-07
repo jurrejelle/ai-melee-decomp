@@ -113,4 +113,8 @@ Perfect match or partial match indicator.
 - Any loop like `i=0; do{ blabla; i++} while (i<10)` should be transformed into `for (i=0; i<10; i++){` instead.
 - Avoid labels like `after_if:` and `goto after_if`, use control flow, if statements, for/while loops etc instead.
 - For structs, label them based on the local offset of the struct. E.g. `struct { /* 0x00 */ u16 x00, /* 0x02 */ u16 x02}` etc. You are allowed to also put the global offset behind the local offset in the comment if it's relevant (e.g. gets referenced from a struct it's embedded in a lot).
+- When matching, ignore register swaps. If all instances of a register in the target are actually another register in our code, that can be counted as matched. We will solve that later using a different skill.
+- When the stack is off (e.g. there's n bytes on the target stack but not on ours), use `PAD_STACK(n);` to create n bytes on the stack. This can only be done at the end of a stack;
+- For statements like `x=n; if(x>0): x=-x`, use `x=ABS(n)` instead.
+- For statements like `x=n; if(x>m): x=m` use `x=MIN(n,m)` instead. Same goes for `MAX(n,m)`
 

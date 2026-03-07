@@ -216,15 +216,13 @@ def main() -> None:
     ap = argparse.ArgumentParser(add_help=True)
     ap.add_argument("--full", action="store_true", help="Print full assembly (ours side).")
     ap.add_argument("--full-both", action="store_true", help="Print full assembly for both ours and target.")
-    ap.add_argument("--both-diff-only", action="store_true", help="Print mismatching instructions for both ours and target.")
     ap.add_argument("symbol", help="Symbol/function name")
     ap.add_argument("unit", nargs="?", default=None, help="Unit name (e.g. main/melee/it/itcoll)")
     args = ap.parse_args()
 
     # Enforce mutually exclusive modes
-    mode_flags = sum(1 for v in [args.full, args.full_both, args.both_diff_only] if v)
-    if mode_flags > 1:
-        print("Error: --full, --full-both, and --both-diff-only are mutually exclusive")
+    if args.full and args.full_both:
+        print("Error: --full and --full-both are mutually exclusive")
         sys.exit(2)
 
     if args.unit:
@@ -275,12 +273,10 @@ def main() -> None:
                 print_target_full(sym)
             elif args.full:
                 print_ours_full(sym)
-            elif args.both_diff_only:
+            else:
+                # Default: show mismatches for both sides
                 print_ours_diff_only(sym)
                 print_target_diff_only(sym)
-            else:
-                # Default iterate mode: ours mismatches only
-                print_ours_diff_only(sym)
 
         if "data_diff" in sym:
             diff_lines = format_data_diff(sym.get("data_diff", []))

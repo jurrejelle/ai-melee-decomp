@@ -24,38 +24,42 @@ Provide a symbol name and optionally a unit name to diff:
 
 ### Recommended: with Unit Name (precise)
 ```bash
-python /home/sysop/.claude/skills/melee-objdiff/objdiff_wrapper.py it_80271B60 main/melee/it/itcoll
-python /home/sysop/.claude/skills/melee-objdiff/objdiff_wrapper.py Command_Execute main/melee/lb/lbcommand
+python .pi/skills/melee-objdiff/objdiff_wrapper.py it_80271B60 main/melee/it/itcoll
+python .pi/skills/melee-objdiff/objdiff_wrapper.py Command_Execute main/melee/lb/lbcommand
 ```
 
 ### Basic: symbol only (may pick wrong unit)
 ```bash
-python /home/sysop/.claude/skills/melee-objdiff/objdiff_wrapper.py it_80271B60
+python .pi/skills/melee-objdiff/objdiff_wrapper.py it_80271B60
 ```
 
 ### Output modes
 
-While iterating, you should almost always use the default mode (diff-focused). Full assembly output is noisy and best used occasionally when you get stuck.
+While iterating, you should almost always use the default mode (paired diff). Full assembly output is noisy and best used occasionally when you get stuck.
 
-- **Default / iterate mode:** show only mismatching instructions
+- **Default / iterate mode:** show only mismatching instructions, paired side-by-side (ours vs target)
   ```bash
-  python /home/sysop/.claude/skills/melee-objdiff/objdiff_wrapper.py it_80271B60 main/melee/it/itcoll
+  python .pi/skills/melee-objdiff/objdiff_wrapper.py it_80271B60 main/melee/it/itcoll
   ```
 
-- **Full assembly (ours side):**
+- **Full assembly (ours side only):**
   ```bash
-  python /home/sysop/.claude/skills/melee-objdiff/objdiff_wrapper.py --full it_80271B60 main/melee/it/itcoll
+  python .pi/skills/melee-objdiff/objdiff_wrapper.py --full it_80271B60 main/melee/it/itcoll
   ```
 
-
-- **Full assembly (both sides):** prints full assembly for both *ours* and *target*
+- **Full assembly (both sides, paired):** prints full paired side-by-side assembly
   ```bash
   python .pi/skills/melee-objdiff/objdiff_wrapper.py --full-both it_80271B60 main/melee/it/itcoll
   ```
 
-- **Diff-only for both sides:**
+- **Paired diff-only (same as default):**
   ```bash
   python .pi/skills/melee-objdiff/objdiff_wrapper.py --both-diff-only it_80271B60 main/melee/it/itcoll
+  ```
+
+- **Section-level summary only (no assembly):**
+  ```bash
+  python .pi/skills/melee-objdiff/objdiff_wrapper.py --sections it_80271B60 main/melee/it/itcoll
   ```
 
 ## How to Find the Unit Name
@@ -71,7 +75,7 @@ Or run with symbol only and it will search all units.
 The tool prints outputs in this order:
 
 ### 1) Compilation errors (if any)
-If the build fails, you’ll see the compiler errors so you can fix them first.
+If the build fails, you'll see the compiler errors so you can fix them first.
 
 ### 2) Symbol match summary
 Each symbol with:
@@ -82,30 +86,27 @@ Each symbol with:
 
 ### 3) Assembly listing
 Depends on output mode:
-- default: mismatches only
-- `--full`: full assembly for ours with diff markers
-- `--full-both`: full assembly for ours and target
-- `--both-diff-only`: only mismatches, printed for ours and target
+- **default / `--both-diff-only`**: paired diff — only mismatching rows, showing both ours and target side-by-side
+- **`--full`**: full assembly for ours side with diff markers
+- **`--full-both`**: full paired side-by-side assembly for both ours and target
 
-### 4) Section summary
-Overall match per section (.text, .data, etc.)
-
-### 5) Final verdict
-Perfect match or partial match indicator.
+### 4) Section summary (only with `--sections`)
+Overall match per section (.text, .data, etc.) — not shown by default.
 
 ## Diff Markers
 
-- `>>>` prefix = instruction has a mismatch
-- `DIFF_ARG_MISMATCH` = argument/register mismatch
-- `DIFF_DELETE` = instruction missing in ours
-- `DIFF_INSERT` = extra instruction in ours
-- `DIFF_REPLACE` = different instruction
+- `>>>` prefix = instruction row has a mismatch
+- `---` = gap (this side has no instruction; the other side does)
+- `DIFF_ARG_MISMATCH` = same opcode, different operand/register/relocation
+- `DIFF_DELETE` = instruction present on this side but not the other
+- `DIFF_INSERT` = instruction present on the other side but not this one (shown as `---` gap)
+- `DIFF_REPLACE` = completely different instruction
 
 ## Tips
 
 - Fix compiler errors first.
 - Use the default output mode while iterating.
-- If you’re stuck on stack layout or scheduling, temporarily use `--full-both` to compare the full instruction streams.
+- If you're stuck on stack layout or scheduling, temporarily use `--full-both` to compare the full instruction streams.
 
 ## Notes on making matches
 - We aim for "true matches" instead of "fake matches". A true match is code like how the developer has written it, e.g. `var->x3[i*2] = 3`, whereas a fake match is code that technically matches but is "slop", e.g. `*(s16*) var+x3+i*2 = 3`
@@ -117,4 +118,3 @@ Perfect match or partial match indicator.
 - When the stack is off (e.g. there's n bytes on the target stack but not on ours), use `PAD_STACK(n);` to create n bytes on the stack. This can only be done at the end of a stack;
 - For statements like `x=n; if(x>0): x=-x`, use `x=ABS(n)` instead.
 - For statements like `x=n; if(x>m): x=m` use `x=MIN(n,m)` instead. Same goes for `MAX(n,m)`
-

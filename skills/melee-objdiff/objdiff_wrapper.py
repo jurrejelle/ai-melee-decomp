@@ -8,6 +8,18 @@ This script:
 
 Default mode is intentionally diff-focused for iteration.
 Use --full / --full-both only when needed.
+
+objdiff JSON layout:
+  left  = "ours"   (compiled from source, base_path)
+  right = "target" (original binary, target_path)
+  Instructions are paired 1:1 by index across left/right.
+  diff_kind values:
+    DIFF_INSERT      — slot exists here but not on the other side
+                       (instruction is null on this side; the real
+                        instruction lives on the *other* side)
+    DIFF_DELETE      — this side has an instruction the other doesn't
+    DIFF_ARG_MISMATCH— same opcode, different operand/reloc
+    DIFF_REPLACE     — completely different opcode
 """
 
 from __future__ import annotations
@@ -20,17 +32,34 @@ import sys
 from pathlib import Path
 from typing import Any
 
-PROJECT_ROOT = Path("/home/sysop/Melee/melee")
+PROJECT_ROOT = Path("/home/ubuntu/Desktop/Melee/melee")
 OBJDIFF_CLI = Path("/bin/objdiff")
 
 # Avoid noisy BrokenPipeError when piping output (e.g. `| head`).
-# Set SIGPIPE to default so the process terminates quietly on a closed pipe.
 try:
     import signal
 
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 except Exception:
     pass
+
+
+# ---------------------------------------------------------------------------
+# Formatting helpers
+# ---------------------------------------------------------------------------
+
+def hex_addr(addr: int | str) -> str:
+    """Convert a decimal address (int or str) to hex."""
+    try:
+        return f"0x{int(addr):X}"
+    except (ValueError, TypeError):
+        return str(addr)
+
+
+def format_inst(inst: dict[str, Any]) -> str:
+    addr = hex_addr(inst.get("address", "?"))
+    formatted = inst.get("formatted", "?")
+    return f"{addr}: {formatted}"
 
 
 def format_data_diff(data_diffs: list[dict[str, Any]]) -> list[str]:
@@ -43,110 +72,124 @@ def format_data_diff(data_diffs: list[dict[str, Any]]) -> list[str]:
     return lines
 
 
-def format_inst(inst: dict[str, Any]) -> str:
-    addr = inst.get("address", "?")
-    formatted = inst.get("formatted", "?")
-    return f"{addr}: {formatted}"
-
+# ---------------------------------------------------------------------------
+# Instruction iterators
+# ---------------------------------------------------------------------------
 
 def iter_instructions(sym: dict[str, Any]) -> list[dict[str, Any]]:
-    # objdiff JSON schema: sym["instructions"] is list of entries.
-    # Entries can contain: instruction, diff_kind, left, right.
     return sym.get("instructions", []) or []
 
 
-def has_diff(entry: dict[str, Any]) -> bool:
-    return entry.get("diff_kind") is not None or (entry.get("left") and entry.get("right"))
+# ---------------------------------------------------------------------------
+# Printing: full assembly
+# ---------------------------------------------------------------------------
 
-
-def print_ours_full(sym: dict[str, Any]) -> None:
+def print_full(label: str, sym: dict[str, Any]) -> None:
+    """Print full assembly for one side with diff markers."""
     instrs = iter_instructions(sym)
-    print(f"\n   OUR ASSEMBLY ({len(instrs)} instructions):")
-    print(f"   {'-' * 50}")
+    real_count = sum(1 for e in instrs if e.get("instruction"))
+    diff_count = sum(1 for e in instrs if e.get("diff_kind"))
+    print(f"\n   {label} ({real_count} instructions):")
+    print(f"   {'-' * 60}")
     for entry in instrs:
         inst = entry.get("instruction")
+        dk = entry.get("diff_kind")
         if not inst:
+            if dk:
+                # Placeholder gap — other side has an instruction here we don't
+                print(f"   >>> {'---':50s} <-- {dk} (gap)")
             continue
         line = format_inst(inst)
-        if entry.get("diff_kind"):
-            print(f"   >>> {line}  <-- {entry.get('diff_kind')}")
+        if dk:
+            print(f"   >>> {line:50s} <-- {dk}")
         else:
-            print(f"   {line}")
-    print(f"   {'-' * 50}")
+            print(f"       {line}")
+    print(f"   {'-' * 60}")
+    total = len(instrs)
+    matched = total - diff_count
+    print(f"   {matched}/{total} instructions match, {diff_count} differ")
 
 
-def print_ours_diff_only(sym: dict[str, Any]) -> None:
+# ---------------------------------------------------------------------------
+# Printing: diff-only (mismatches)
+# ---------------------------------------------------------------------------
+
+def print_diff_only(label: str, sym: dict[str, Any]) -> None:
+    """Print only mismatching instructions for one side."""
     instrs = iter_instructions(sym)
-    diffs = [e for e in instrs if e.get("instruction") and has_diff(e)]
-    print(f"\n   OUR MISMATCHES ({len(diffs)} entries):")
-    print(f"   {'-' * 50}")
+    diffs = [e for e in instrs if e.get("diff_kind")]
+    print(f"\n   {label} ({len(diffs)} diff entries):")
+    print(f"   {'-' * 60}")
     for entry in diffs:
         inst = entry.get("instruction")
+        dk = entry.get("diff_kind", "CHANGED")
         if not inst:
-            continue
-        print(f"   >>> {format_inst(inst)}  <-- {entry.get('diff_kind', 'CHANGED')}")
-    print(f"   {'-' * 50}")
+            print(f"   >>> {'---':50s} <-- {dk} (gap)")
+        else:
+            print(f"   >>> {format_inst(inst):50s} <-- {dk}")
+    if not diffs:
+        print("   (no differences)")
+    print(f"   {'-' * 60}")
 
 
-def print_target_full(sym: dict[str, Any]) -> None:
-    instrs = iter_instructions(sym)
-    # For target, prefer the "right" side instruction when present, otherwise "instruction".
-    # In matches, right may be missing.
-    collected: list[dict[str, Any]] = []
-    for e in instrs:
-        if e.get("right"):
-            collected.append(e["right"])
-        elif e.get("instruction"):
-            collected.append(e["instruction"])
+# ---------------------------------------------------------------------------
+# Printing: paired side-by-side diff
+# ---------------------------------------------------------------------------
 
-    print(f"\n   TARGET ASSEMBLY ({len(collected)} instructions):")
-    print(f"   {'-' * 50}")
-    for inst in collected:
-        print(f"   {format_inst(inst)}")
-    print(f"   {'-' * 50}")
+def print_paired_diff(ours_sym: dict[str, Any],
+                      target_sym: dict[str, Any] | None,
+                      full: bool) -> None:
+    """Print paired side-by-side comparison.
 
+    If full=True, prints every instruction.  Otherwise only rows with diffs.
+    """
+    ours_instrs = iter_instructions(ours_sym)
+    target_instrs = iter_instructions(target_sym) if target_sym else []
+    max_len = max(len(ours_instrs), len(target_instrs))
 
-def print_target_diff_only(sym: dict[str, Any]) -> None:
-    instrs = iter_instructions(sym)
-    diffs = [e for e in instrs if has_diff(e)]
-    print(f"\n   TARGET MISMATCHES ({len(diffs)} entries):")
-    print(f"   {'-' * 50}")
+    if full:
+        print(f"\n   PAIRED ASSEMBLY ({max_len} rows):")
+    else:
+        print(f"\n   PAIRED DIFF:")
+    print(f"   {'OURS':<44s}  {'TARGET':>44s}")
+    print(f"   {'-' * 93}")
 
-    printed = 0
-    no_target_data = 0
-    for e in diffs:
-        kind = e.get("diff_kind", "CHANGED")
+    diff_count = 0
+    for i in range(max_len):
+        ours_e = ours_instrs[i] if i < len(ours_instrs) else {}
+        tgt_e = target_instrs[i] if i < len(target_instrs) else {}
 
-        # Prefer explicit target-side instruction if present.
-        inst = e.get("right")
-        if inst:
-            print(f"   >>> {format_inst(inst)}  <-- {kind}")
-            printed += 1
-            continue
+        ours_dk = ours_e.get("diff_kind")
+        tgt_dk = tgt_e.get("diff_kind")
+        has_diff = bool(ours_dk or tgt_dk)
 
-        # For DIFF_INSERT (extra in ours), there may be only a `left`.
-        left_inst = e.get("left")
-        if left_inst:
-            print(f"   >>> (no target inst) ours has {format_inst(left_inst)}  <-- {kind}")
-            printed += 1
+        if not full and not has_diff:
             continue
 
-        # objdiff does not include the target-side instruction for some diff types
-        # (e.g. DIFF_ARG_MISMATCH). The `instruction` field here is OUR instruction,
-        # NOT the target — showing it in the target section would be misleading.
-        # Count these and suggest --full-both instead.
-        if e.get("instruction"):
-            no_target_data += 1
+        diff_count += has_diff
 
-    if no_target_data:
-        print(f"   ({no_target_data} {no_target_data == 1 and 'entry' or 'entries'} omitted: objdiff did not provide target instruction data")
-        print(f"    for these diff types. Use --full-both to see the full target assembly.)")
+        ours_inst = ours_e.get("instruction")
+        tgt_inst = tgt_e.get("instruction")
 
-    if printed == 0 and no_target_data == 0:
-        print("   (no printable entries)")
+        ours_str = format_inst(ours_inst) if ours_inst else "---"
+        tgt_str = format_inst(tgt_inst) if tgt_inst else "---"
 
-    print(f"   {'-' * 50}")
+        if has_diff:
+            dk_label = ours_dk or tgt_dk or "CHANGED"
+            print(f"   >>> {ours_str:<42s}  |  {tgt_str:>42s}  [{dk_label}]")
+        else:
+            print(f"       {ours_str:<42s}  |  {tgt_str:>42s}")
 
+    print(f"   {'-' * 93}")
+    if not full:
+        total = max_len
+        matched = total - diff_count
+        print(f"   {matched}/{total} instructions match, {diff_count} differ")
+
+
+# ---------------------------------------------------------------------------
+# Build helpers
+# ---------------------------------------------------------------------------
 
 def get_object_path(unit: str) -> Path:
     parts = unit.split('/')
@@ -176,7 +219,10 @@ def maybe_build_unit(unit: str) -> None:
         if src_path.stat().st_mtime > obj_path.stat().st_mtime:
             print("Source file is newer than object, running ninja...")
             rel_obj_path = obj_path.relative_to(PROJECT_ROOT)
-            result = subprocess.run(["ninja", "-j1", str(rel_obj_path)], cwd=PROJECT_ROOT, capture_output=True, text=True)
+            result = subprocess.run(
+                ["ninja", "-j1", str(rel_obj_path)],
+                cwd=PROJECT_ROOT, capture_output=True, text=True,
+            )
             if result.returncode == 0:
                 print(f"  Built: {obj_path}")
             else:
@@ -188,8 +234,17 @@ def maybe_build_unit(unit: str) -> None:
         print("  Run ninja first to build the project.")
 
 
+# ---------------------------------------------------------------------------
+# objdiff runner
+# ---------------------------------------------------------------------------
+
 def run_objdiff(symbol: str, unit: str | None) -> dict[str, Any]:
-    cmd = [str(OBJDIFF_CLI), "diff", "-p", str(PROJECT_ROOT), "--format", "json", "--output", "-"]
+    cmd = [
+        str(OBJDIFF_CLI), "diff",
+        "-p", str(PROJECT_ROOT),
+        "--format", "json",
+        "--output", "-",
+    ]
     if unit:
         cmd.extend(["-u", unit])
     cmd.append(symbol)
@@ -212,18 +267,33 @@ def run_objdiff(symbol: str, unit: str | None) -> dict[str, Any]:
         sys.exit(1)
 
 
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
 def main() -> None:
     ap = argparse.ArgumentParser(add_help=True)
-    ap.add_argument("--full", action="store_true", help="Print full assembly (ours side).")
-    ap.add_argument("--full-both", action="store_true", help="Print full assembly for both ours and target.")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--full", action="store_true",
+        help="Print full assembly (ours side only, with diff markers).",
+    )
+    mode.add_argument(
+        "--full-both", action="store_true",
+        help="Print full paired side-by-side assembly for both ours and target.",
+    )
+    mode.add_argument(
+        "--both-diff-only", action="store_true",
+        help="Print paired diff (only mismatching rows, both sides).",
+    )
+    mode.add_argument(
+        "--sections", action="store_true",
+        help="Print section-level match summary only (no assembly).",
+    )
     ap.add_argument("symbol", help="Symbol/function name")
-    ap.add_argument("unit", nargs="?", default=None, help="Unit name (e.g. main/melee/it/itcoll)")
+    ap.add_argument("unit", nargs="?", default=None,
+                    help="Unit name (e.g. main/melee/it/itcoll)")
     args = ap.parse_args()
-
-    # Enforce mutually exclusive modes
-    if args.full and args.full_both:
-        print("Error: --full and --full-both are mutually exclusive")
-        sys.exit(2)
 
     if args.unit:
         maybe_build_unit(args.unit)
@@ -231,8 +301,28 @@ def main() -> None:
     data = run_objdiff(args.symbol, args.unit)
 
     left = data.get("left", {})
+    right = data.get("right", {})
     symbols = left.get("symbols", [])
-    # sections are available but intentionally unused (symbol-level tool)
+    right_symbols = right.get("symbols", [])
+
+    # Build lookup from symbol name → right-side symbol data
+    right_sym_map: dict[str, dict[str, Any]] = {}
+    for rs in right_symbols:
+        rname = rs.get("name", "")
+        if rname:
+            right_sym_map[rname] = rs
+
+    # Section-only mode: just print section match percentages and exit
+    if args.sections:
+        left_sections = left.get("sections", [])
+        print("\n=== SECTION SUMMARY ===")
+        for s in left_sections:
+            mp = s.get("match_percent")
+            if mp is not None:
+                status = "✓" if mp == 100.0 else "✗"
+                print(f"  {status} {s['name']}: {mp:.1f}%")
+        print()
+        return
 
     matching_symbols = [s for s in symbols if args.symbol in s.get("name", "")]
 
@@ -254,7 +344,7 @@ def main() -> None:
     for sym in matching_symbols:
         name = sym.get("name", "?")
         match = sym.get("match_percent", 0)
-        addr = sym.get("address", "?")
+        raw_addr = sym.get("address")
         size = sym.get("size", "?")
         flags = sym.get("flags", 0)
 
@@ -262,21 +352,26 @@ def main() -> None:
         status = "✓" if match == 100.0 else "✗"
 
         print(f"{status} {name} [{sym_type}]")
-        if addr != "?":
-            print(f"   Address: 0x{addr}  Size: {size} bytes  Match: {match}%")
+        if raw_addr is not None:
+            print(f"   Address: {hex_addr(raw_addr)}  Size: {size} bytes  Match: {match}%")
         else:
             print(f"   Size: {size} bytes  Match: {match}%")
 
+        target_sym = right_sym_map.get(name)
+
         if "instructions" in sym:
             if args.full_both:
-                print_ours_full(sym)
-                print_target_full(sym)
+                # Full paired side-by-side
+                print_paired_diff(sym, target_sym, full=True)
+            elif args.both_diff_only:
+                # Paired but diff-only
+                print_paired_diff(sym, target_sym, full=False)
             elif args.full:
-                print_ours_full(sym)
+                # Full assembly, ours only
+                print_full("OUR ASSEMBLY", sym)
             else:
-                # Default: show mismatches for both sides
-                print_ours_diff_only(sym)
-                print_target_diff_only(sym)
+                # Default: paired diff-only (most useful for iteration)
+                print_paired_diff(sym, target_sym, full=False)
 
         if "data_diff" in sym:
             diff_lines = format_data_diff(sym.get("data_diff", []))
@@ -287,16 +382,9 @@ def main() -> None:
 
         print()
 
-    # Note: This wrapper is intended for symbol-level iteration, so it does not
-    # print section-wide match summaries.
-
 
 if __name__ == "__main__":
-    # If output is piped and the reader exits early, exit quietly.
     try:
         main()
     except BrokenPipeError:
-        # Hard-exit without running Python cleanup that can emit
-        # "Exception ignored ... BrokenPipeError" when stdout is closed.
         os._exit(0)
-

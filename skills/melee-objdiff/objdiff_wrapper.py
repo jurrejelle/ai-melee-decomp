@@ -10,8 +10,8 @@ Default mode is intentionally diff-focused for iteration.
 Use --full / --full-both only when needed.
 
 objdiff JSON layout:
-  left  = "ours"   (compiled from source, base_path)
-  right = "target" (original binary, target_path)
+  left  = "target" (original binary, target_path / -1)
+  right = "ours"   (compiled from source, base_path / -2)
   Instructions are paired 1:1 by index across left/right.
   diff_kind values:
     DIFF_INSERT      — slot exists here but not on the other side
@@ -300,23 +300,25 @@ def main() -> None:
 
     data = run_objdiff(args.symbol, args.unit)
 
-    left = data.get("left", {})
-    right = data.get("right", {})
-    symbols = left.get("symbols", [])
-    right_symbols = right.get("symbols", [])
+    left = data.get("left", {})   # target (original binary)
+    right = data.get("right", {})  # ours (compiled from source)
 
-    # Build lookup from symbol name → right-side symbol data
-    right_sym_map: dict[str, dict[str, Any]] = {}
-    for rs in right_symbols:
-        rname = rs.get("name", "")
-        if rname:
-            right_sym_map[rname] = rs
+    # "ours" symbols come from right; "target" symbols from left
+    ours_symbols = right.get("symbols", [])
+    target_symbols = left.get("symbols", [])
+
+    # Build lookup from symbol name → target-side symbol data
+    target_sym_map: dict[str, dict[str, Any]] = {}
+    for ts in target_symbols:
+        tname = ts.get("name", "")
+        if tname:
+            target_sym_map[tname] = ts
 
     # Section-only mode: just print section match percentages and exit
     if args.sections:
-        left_sections = left.get("sections", [])
+        ours_sections = right.get("sections", [])
         print("\n=== SECTION SUMMARY ===")
-        for s in left_sections:
+        for s in ours_sections:
             mp = s.get("match_percent")
             if mp is not None:
                 status = "✓" if mp == 100.0 else "✗"
@@ -324,21 +326,21 @@ def main() -> None:
         print()
         return
 
-    matching_symbols = [s for s in symbols if args.symbol in s.get("name", "")]
+    matching_symbols = [s for s in ours_symbols if args.symbol in s.get("name", "")]
 
     print("\n=== SYMBOL MATCH SUMMARY ===\n")
 
     if not matching_symbols:
         print(f"No symbols found matching '{args.symbol}'")
-        if symbols:
+        if ours_symbols:
             print("\nAvailable symbols:")
-            for s in symbols[:20]:
+            for s in ours_symbols[:20]:
                 name = s.get("name", "?")
                 match = s.get("match_percent", 0)
                 status = "✓" if match == 100.0 else "✗"
                 print(f"  {status} {name} ({match}%)")
-            if len(symbols) > 20:
-                print(f"  ... and {len(symbols) - 20} more")
+            if len(ours_symbols) > 20:
+                print(f"  ... and {len(ours_symbols) - 20} more")
         sys.exit(1)
 
     for sym in matching_symbols:
@@ -346,7 +348,10 @@ def main() -> None:
         match = sym.get("match_percent", 0)
         raw_addr = sym.get("address")
         size = sym.get("size", "?")
-        flags = sym.get("flags", 0)
+
+        # Use target symbol flags for type (ground truth from original binary)
+        target_sym = target_sym_map.get(name)
+        flags = target_sym.get("flags", 0) if target_sym else sym.get("flags", 0)
 
         sym_type = "FUNC" if flags == 1 else "DATA" if flags == 2 else "UNK"
         status = "✓" if match == 100.0 else "✗"
@@ -356,8 +361,6 @@ def main() -> None:
             print(f"   Address: {hex_addr(raw_addr)}  Size: {size} bytes  Match: {match}%")
         else:
             print(f"   Size: {size} bytes  Match: {match}%")
-
-        target_sym = right_sym_map.get(name)
 
         if "instructions" in sym:
             if args.full_both:

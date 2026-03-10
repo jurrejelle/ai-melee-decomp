@@ -118,3 +118,5 @@ Overall match per section (.text, .data, etc.) — not shown by default.
 - When the stack is off (e.g. there's n bytes on the target stack but not on ours), use `PAD_STACK(n);` to create n bytes on the stack. This can only be done at the end of a stack;
 - For statements like `x=n; if(x>0): x=-x`, use `x=ABS(n)` instead.
 - For statements like `x=n; if(x>m): x=m` use `x=MIN(n,m)` instead. Same goes for `MAX(n,m)`
+- When making a new struct, don't make it an extern u8[], but make it a proper struct. Look at other structs in the codebase for inspiration. Follow the struct naming scheme mentioned above and put padding as "u8 pad_xx[n]"
+- When accessing fields that are currently in a pad[...], split up the pad into pad_xx[n], var_to_use, pad_yy[m]

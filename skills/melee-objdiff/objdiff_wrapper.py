@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-PROJECT_ROOT = Path("/home/ubuntu/Desktop/Melee/melee")
+PROJECT_ROOT = Path("/home/sysop/Melee/melee")
 OBJDIFF_CLI = Path("/bin/objdiff")
 
 # Avoid noisy BrokenPipeError when piping output (e.g. `| head`).

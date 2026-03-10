@@ -8,6 +8,7 @@ For EACH function, follow this exact workflow:
   ## Step 1: Match function
   Iteratively perform the following steps:
   Read the melee-objdiff skill (under /home/sysop/.claude/skills/) and generate the relevant diff
+  Specifically pay close attention to the "Notes on making matches" section, this will help you simplify code and make better matches.
   Iterate on the current solution until you either get a 100% match, or don't see any improvements in 4-5 attempts.
   For this iteration, it is especially important that you follow the style guide in the diff skill. This iteration is for making the diff neater while retaining high match percentage.
   

@@ -10,7 +10,7 @@ For EACH function, follow this exact workflow:
   cd /home/sysop/Melee/melee
   python tools/decomp.py --no-copy [function_name]
   
-  Then copy the output into the target c file and potentially update the prototype in the .h file.
+  Then copy the output into the target c file and potentially update the prototype in the .h file. Explicitly replace the existing ///[function_name] comment, if it exists
   
   ## Step 2: Build and fix errors
   Run:

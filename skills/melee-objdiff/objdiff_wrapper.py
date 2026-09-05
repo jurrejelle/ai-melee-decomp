@@ -316,9 +316,11 @@ def main() -> None:
 
     # Section-only mode: just print section match percentages and exit
     if args.sections:
-        ours_sections = right.get("sections", [])
+        # Section match_percent is only emitted on the target side; the ours
+        # side carries names and sizes but no percentages.
+        sections = left.get("sections", [])
         print("\n=== SECTION SUMMARY ===")
-        for s in ours_sections:
+        for s in sections:
             mp = s.get("match_percent")
             if mp is not None:
                 status = "✓" if mp == 100.0 else "✗"

@@ -92,6 +92,48 @@ watching a fuzzy percentage crawl.
   four inlined `bSqrt` fallbacks; we re-`lis` it each time. Different shape, so
   hunting a callee-saved culprit there would have been wasted effort.
 
+## Sibling problem: the order of a run of stores
+
+A constructor or init function whose diff is the *same* stores in a different
+order is not a register problem, and permuting the source at random is a bad
+way to find it — there are n! orders and most score the same. Derive it.
+
+`rank_for_schedule` (haifa-sched.c) compares, in order:
+
+1. `INSN_PRIORITY` — longest path to the end of the block. A run of independent
+   stores are all leaves, so they all tie at 0.
+2. `INSN_REG_WEIGHT` — registers set minus registers that die here. **Smaller
+   wins**, so a store carrying a `REG_DEAD` note (the last use of its value
+   register, in RTL order) is scheduled *before* one that kills nothing.
+3. class relative to the last-scheduled insn — an insn independent of it beats
+   one data-dependent on it.
+4. `INSN_LUID` — original order.
+
+So retail's emitted order reads back as: **the last store of each value
+register comes first, then everything else in source order.** Invert that and
+the source order falls out uniquely.
+
+Worked example — `CSTATEMGR_Base::CSTATEMGR_Base`, six stores, 85.7%. Retail:
+
+    stfs f0,8   stw r0,0x10   stw r0,0xc   stw r0,0x14   stfs f0,4   stw r0,0x18
+
+Two value registers, so two killers: `stfs f0,8` and `stw r0,0x10` lead, which
+means m_DeltaTime is the last float store in the source and m_pHeadStateObj the
+last integer one. The remaining four emit in source order: 0xc, 0x14, 4, 0x18.
+Source order is therefore m_eStateType, m_CurNumStates, m_CurTime,
+bIsInitialized, m_DeltaTime, m_pHeadStateObj — 100% first try, after eight
+hand-guessed permutations had all scored 71-86%.
+
+Two cautions:
+
+- Count the value registers first. If one constant is materialised twice
+  (two `li 0`s), there are two killers among the stores that share that value,
+  and the reasoning above splits accordingly.
+- A run of stores with *one* shared value register gives the cleanest evidence:
+  exactly one killer, everything else in source order. Prefer that call site
+  when an inline is expanded more than once with different arguments.
+
+
 ## Gotchas
 
 - `--cflags` needs `=`: `--cflags=-fno-gcse`, not `--cflags -fno-gcse` (argparse

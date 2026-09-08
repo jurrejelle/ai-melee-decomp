@@ -176,14 +176,20 @@ def target_prologue(unit, func):
                           f"--stop-address={start+size}", str(REPO / tgt)],
                          capture_output=True, text=True).stdout
     # Only scan operands: --no-show-raw-insn is used, but the address column
-    # would still match, and objdump misdecodes paired-single psq_st/psq_l as
-    # VSX, so the prologue is not a reliable place to read the saved set from.
-    # Any callee-saved register appearing at all must have been saved.
+    # would still match. Any callee-saved register appearing at all must have
+    # been saved, which beats pattern-matching a prologue.
+    #
+    # objdump has no Gekko paired-single support, so psq_st/psq_l decode as VSX
+    # or POWER instructions whose operands read as registers that are not really
+    # there (psq_l f30,48(r1) prints as "lq r30,48(r1)"). This is a 750CL, so
+    # any such mnemonic is a misdecode: skip the whole instruction.
+    BOGUS = re.compile(r"^(xx|lq$|stq$|lxv|stxv|vsel)")
     frame, used = None, set()
     for line in dis.splitlines():
         m = re.match(r"\s*[0-9a-f]+:\s+(\S+)\s*(.*)", line)
         if not m: continue
         mnem, ops = m.groups()
+        if BOGUS.match(mnem): continue
         if mnem == "stwu" and frame is None:
             f = re.search(r"r1,(-?\d+)\(r1\)", ops)
             if f: frame = -int(f.group(1))

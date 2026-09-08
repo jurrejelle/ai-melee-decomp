@@ -9,17 +9,16 @@ Use this **before** guessing at source rewrites. A function whose DWARF matches
 but whose diff is register substitutions is not a logic problem, and reshuffling
 statements to see what sticks wastes hours. The compiler will just tell you.
 
-    SKILL=/home/shared/.claude/skills/nfsmw-regalloc
-    PY=/home/shared/nfsmw/nfsmw_venv/bin/python
+`regalloc.py` sits in this skill's directory and needs only the standard
+library. Run it from anywhere inside the decomp checkout — it finds the repo by
+walking up to `objdiff.json`, or set `NFSMW_REPO`.
 
-    $PY $SKILL/regalloc.py -u <unit> -f '<function>' --target
+    python3 regalloc.py -u <unit> -f '<function>' --target
 
 ## The one thing to know
 
-`ngccc.exe` is GCC 2.x. Its sources ship in `/home/shared/nfsmw/prodg_decomp`
-(`ProDGforNGCv393_Source_Code.zip` → `NGC_GNU_SRC/NGC/gcc`). Global register
-allocation is a **single descending pass over one priority number**
-(`global.c:allocno_compare`):
+`ngccc.exe` is GCC 2.x. Global register allocation is a **single descending
+pass over one priority number** (`global.c:allocno_compare`):
 
     pri = (floor_log2(n_refs) * n_refs / live_length) * 10000 * size
 
@@ -63,7 +62,7 @@ shapes it distinguishes:
 
 ## Then: what is it, and who made it
 
-    $PY $SKILL/regalloc.py -u <unit> -f '<fn>' --reg 128
+    python3 regalloc.py -u <unit> -f '<fn>' --reg 128
 
 prints the RTL insns that mention that pseudo. `(set (reg:SI 128) (high:SI
 (symbol_ref "*$LC930")))` is a hoisted constant *address*; a `(mem/u:DF ...)`
@@ -73,7 +72,7 @@ conversion magic.
 Then bisect the pass that created it — extra flags are appended last, so they
 override the build's:
 
-    $PY $SKILL/regalloc.py -u <unit> -f '<fn>' --cflags=-fno-gcse
+    python3 regalloc.py -u <unit> -f '<fn>' --cflags=-fno-gcse
     ... --cflags=-fno-move-all-movables    ... --cflags=-fno-rerun-loop-opt
 
 Watch the `;; callee-saved:` line. When one flag reproduces retail's set, that

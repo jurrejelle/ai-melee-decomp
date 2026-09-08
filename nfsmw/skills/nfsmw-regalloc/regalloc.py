@@ -16,12 +16,24 @@ the priority order. This shows you which allocno that is and what it holds.
   regalloc.py -u <unit> -f '<fn>' --reg 145        # what pseudo 145 actually holds
   regalloc.py -u <unit> -f '<fn>' --cflags=-fno-gcse
 
-Set NFSMW_REPO to point at a checkout other than /home/shared/nfsmw/nfsmw.
+Run from anywhere inside the decomp checkout, or set NFSMW_REPO to point at it.
 """
 import argparse, hashlib, json, os, re, shlex, subprocess, sys
 from pathlib import Path
 
-REPO = Path(os.environ.get("NFSMW_REPO", "/home/shared/nfsmw/nfsmw"))
+def find_repo():
+    """$NFSMW_REPO, else the nearest enclosing directory holding objdiff.json."""
+    env = os.environ.get("NFSMW_REPO")
+    if env:
+        return Path(env).resolve()
+    for d in [Path.cwd(), *Path.cwd().parents]:
+        if (d / "objdiff.json").exists():
+            return d
+    sys.exit("not inside a decomp checkout (no objdiff.json found above the "
+             "current directory); cd into it or set NFSMW_REPO")
+
+
+REPO = find_repo()
 CACHE = Path(os.environ.get("XDG_CACHE_HOME", "/tmp")) / "nfsmw-regalloc"
 
 # rs6000.h: 0-31 GPR, 32-63 FPR, 64 mq, 65 lr, 66 ctr, 67 ap, 68-75 cr0-7, 76 fpmem

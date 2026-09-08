@@ -151,8 +151,6 @@ def parse_greg(body):
         hard = [int(x) for x in m.group(1).split()]
     return order, disp, hard, conflicts, prefs, sizes
 
-PROLOGUE_RE = re.compile(r"(stwu\s+r1,(-?\d+)\(r1\))|(stmw\s+r(\d+),)|(stw\s+r(\d+),\d+\(r1\))|(stfd\s+f(\d+),\d+\(r1\))")
-
 def target_prologue(unit, func):
     """What the retail object actually saves: frame size + callee-saved set."""
     cfg = json.loads((REPO / "objdiff.json").read_text())
@@ -173,19 +171,26 @@ def target_prologue(unit, func):
     m = re.search(rf"^([0-9a-f]+).*\s{re.escape(sym)}$", syms, re.M)
     if not m: return None
     start = int(m.group(1), 16)
-    dis = subprocess.run([str(od), "-d", f"--start-address={start}",
+    dis = subprocess.run([str(od), "-d", "--no-show-raw-insn",
+                          f"--start-address={start}",
                           f"--stop-address={start+size}", str(REPO / tgt)],
                          capture_output=True, text=True).stdout
-    frame, saved, used = None, set(), set()
-    for mm in re.finditer(r"\b([rf])(\d{1,2})\b", dis.split("\n", 5)[-1]):
-        used.add(int(mm.group(2)) + (0 if mm.group(1) == "r" else 32))
-    for mm in PROLOGUE_RE.finditer(dis):
-        if mm.group(2) is not None and frame is None: frame = -int(mm.group(2))
-        if mm.group(4): saved |= {int(mm.group(4)) + k for k in range(32 - int(mm.group(4)))}
-        if mm.group(6) and callee_saved(int(mm.group(6))): saved.add(int(mm.group(6)))
-        if mm.group(8) and callee_saved(32 + int(mm.group(8))): saved.add(32 + int(mm.group(8)))
+    # Only scan operands: --no-show-raw-insn is used, but the address column
+    # would still match, and objdump misdecodes paired-single psq_st/psq_l as
+    # VSX, so the prologue is not a reliable place to read the saved set from.
+    # Any callee-saved register appearing at all must have been saved.
+    frame, used = None, set()
+    for line in dis.splitlines():
+        m = re.match(r"\s*[0-9a-f]+:\s+(\S+)\s*(.*)", line)
+        if not m: continue
+        mnem, ops = m.groups()
+        if mnem == "stwu" and frame is None:
+            f = re.search(r"r1,(-?\d+)\(r1\)", ops)
+            if f: frame = -int(f.group(1))
+        for mm in re.finditer(r"\b([rf])(\d{1,2})\b", ops):
+            used.add(int(mm.group(2)) + (0 if mm.group(1) == "r" else 32))
     return dict(sym=sym, frame=frame, used=sorted(used),
-                saved=sorted(r for r in saved if callee_saved(r)))
+                saved=sorted(r for r in used if callee_saved(r)))
 
 def pick(funcs, want):
     if want in funcs: return want
